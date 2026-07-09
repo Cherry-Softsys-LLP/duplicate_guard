@@ -1,0 +1,6 @@
+# Patches added to this app are executed, top to bottom, on `bench migrate`.
+# Format: dotted.path.to.module.execute  (each module must expose execute())
+# No data patches are needed for the initial release.
+[pre_model_sync]
+
+[post_model_sync]

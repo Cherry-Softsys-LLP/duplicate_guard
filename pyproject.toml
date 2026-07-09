@@ -1,0 +1,34 @@
+[project]
+name = "duplicate_guard"
+authors = [
+    { name = "Your Company", email = "support@example.com" }
+]
+description = "Prevent duplicate Leads and Customers in ERPNext (v15)."
+requires-python = ">=3.10"
+readme = "README.md"
+dynamic = ["version"]
+dependencies = [
+    # Google's libphonenumber (Python port). Used for accurate, country-aware
+    # phone normalization to E.164 so numbers from different countries are not
+    # falsely matched. Pure-Python, no system libraries required. The app also
+    # ships a built-in fallback and will still run if this is somehow absent.
+    "phonenumbers>=8.13.0",
+]
+
+[project.urls]
+Homepage = "https://example.com/duplicate_guard"
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+# Tell flit which package to build (the inner python package) and where to read
+# the version from (its __init__.py __version__).
+[tool.flit.module]
+name = "duplicate_guard"
+
+# Bench reads this to check compatible framework versions.
+# Supports Frappe v15 and v16. (A cap of <16.0.0 would block installation on a
+# v16 bench, which is the classic "app depends on frappe>=15" migration breaker.)
+[tool.bench.frappe-dependencies]
+frappe = ">=15.0.0,<17.0.0"

@@ -1,0 +1,144 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:DGR-{YYYY}-{#####}",
+ "creation": "2025-01-01 00:00:00.000000",
+ "description": "A logged duplicate collision detected while Migration Mode was active.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "record_section",
+  "reference_doctype",
+  "reference_name",
+  "source_field",
+  "column_break_record",
+  "duplicate_type",
+  "duplicate_value",
+  "matched_section",
+  "matched_doctype",
+  "matched_name",
+  "matched_field",
+  "column_break_matched",
+  "status",
+  "detected_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "record_section",
+   "fieldtype": "Section Break",
+   "label": "Incoming Record"
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Reference DocType",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "label": "Reference Name",
+   "options": "reference_doctype"
+  },
+  {
+   "fieldname": "source_field",
+   "fieldtype": "Data",
+   "label": "Source Field"
+  },
+  {
+   "fieldname": "column_break_record",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "duplicate_type",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Duplicate Type",
+   "options": "Name\nPhone\nEmail"
+  },
+  {
+   "fieldname": "duplicate_value",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Duplicate Value"
+  },
+  {
+   "fieldname": "matched_section",
+   "fieldtype": "Section Break",
+   "label": "Existing Match"
+  },
+  {
+   "fieldname": "matched_doctype",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Matched DocType",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "matched_name",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "label": "Matched Name",
+   "options": "matched_doctype"
+  },
+  {
+   "fieldname": "matched_field",
+   "fieldtype": "Data",
+   "label": "Matched Field"
+  },
+  {
+   "fieldname": "column_break_matched",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Open",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Open\nReviewed\nIgnored\nMerged"
+  },
+  {
+   "fieldname": "detected_on",
+   "fieldtype": "Datetime",
+   "label": "Detected On"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2025-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Duplicate Guard",
+ "name": "Duplicate Report",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1,
+   "role": "System Manager",
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1,
+   "email": 1,
+   "print": 1,
+   "share": 1
+  },
+  {
+   "read": 1,
+   "role": "Sales Manager",
+   "write": 1,
+   "report": 1
+  }
+ ],
+ "quick_entry": 0,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

@@ -1,0 +1,152 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2025-01-01 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "enforcement_section",
+  "enabled",
+  "strict_mode",
+  "migration_mode",
+  "column_break_enforcement",
+  "check_names",
+  "check_phones",
+  "check_emails",
+  "phone_section",
+  "default_country_code",
+  "default_region",
+  "national_number_length",
+  "scope_section",
+  "guarded_doctypes",
+  "function_scopes",
+  "name_field_overrides"
+ ],
+ "fields": [
+  {
+   "fieldname": "enforcement_section",
+   "fieldtype": "Section Break",
+   "label": "Enforcement"
+  },
+  {
+   "default": "1",
+   "description": "Master switch. When off, no duplicate checking happens at all.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "default": "1",
+   "description": "Reject duplicates with an error. This is the normal production behaviour.",
+   "fieldname": "strict_mode",
+   "fieldtype": "Check",
+   "label": "Strict Mode"
+  },
+  {
+   "default": "0",
+   "description": "Do not block duplicates; instead create a Duplicate Report row for later review. Migration Mode overrides Strict Mode.",
+   "fieldname": "migration_mode",
+   "fieldtype": "Check",
+   "label": "Migration Mode"
+  },
+  {
+   "fieldname": "column_break_enforcement",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "check_names",
+   "fieldtype": "Check",
+   "label": "Check Names"
+  },
+  {
+   "default": "1",
+   "fieldname": "check_phones",
+   "fieldtype": "Check",
+   "label": "Check Phone Numbers"
+  },
+  {
+   "default": "1",
+   "fieldname": "check_emails",
+   "fieldtype": "Check",
+   "label": "Check Emails"
+  },
+  {
+   "fieldname": "phone_section",
+   "fieldtype": "Section Break",
+   "label": "Phone Normalization"
+  },
+  {
+   "default": "91",
+   "description": "Numeric dialing code without '+', used when a bare number has no country code. India = 91, USA/Canada = 1, UK = 44.",
+   "fieldname": "default_country_code",
+   "fieldtype": "Data",
+   "label": "Default Country Code"
+  },
+  {
+   "default": "IN",
+   "description": "ISO country code (2 letters) used to interpret numbers typed without a country code. India = IN, USA = US, UK = GB. Used by the phonenumbers library when installed.",
+   "fieldname": "default_region",
+   "fieldtype": "Data",
+   "label": "Default Region (ISO)"
+  },
+  {
+   "default": "10",
+   "description": "Expected number of digits in a local number (India = 10).",
+   "fieldname": "national_number_length",
+   "fieldtype": "Int",
+   "label": "National Number Length"
+  },
+  {
+   "fieldname": "scope_section",
+   "fieldtype": "Section Break",
+   "label": "Scope"
+  },
+  {
+   "default": "Customer\nLead\nSupplier\nEmployee\nContact",
+   "description": "One DocType per line. These are the DocTypes that get duplicate-checked. Address is intentionally excluded.",
+   "fieldname": "guarded_doctypes",
+   "fieldtype": "Small Text",
+   "label": "Guarded DocTypes"
+  },
+  {
+   "default": "Sales: Lead, Customer\nPurchase: Supplier\nHR: Employee",
+   "description": "Business functions. Duplicates are only detected WITHIN a function, so the same phone/email may appear across functions. Format 'Function: DocType, DocType', one per line. A Contact inherits the function of the party it links to.",
+   "fieldname": "function_scopes",
+   "fieldtype": "Small Text",
+   "label": "Function Scopes"
+  },
+  {
+   "description": "Optional. Override which field(s) hold the entity name, one per line, e.g. 'Lead: company_name, lead_name'. Leave blank to use sensible defaults.",
+   "fieldname": "name_field_overrides",
+   "fieldtype": "Small Text",
+   "label": "Name Field Overrides"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2025-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Duplicate Guard",
+ "name": "Duplicate Guard Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1,
+   "role": "System Manager",
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "share": 1
+  }
+ ],
+ "quick_entry": 0,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

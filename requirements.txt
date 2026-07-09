@@ -1,0 +1,5 @@
+# Runtime dependency: Google's libphonenumber (Python port) for accurate,
+# country-aware phone normalization. Pure-Python, no system libraries needed.
+# The app ships a built-in fallback, so it still runs if this is missing, but
+# installing it is strongly recommended for correct cross-country matching.
+phonenumbers>=8.13.0

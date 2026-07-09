@@ -1,0 +1,17 @@
+include MANIFEST.in
+include requirements.txt
+include *.json
+include *.md
+include *.txt
+recursive-include duplicate_guard *.css
+recursive-include duplicate_guard *.csv
+recursive-include duplicate_guard *.html
+recursive-include duplicate_guard *.ico
+recursive-include duplicate_guard *.js
+recursive-include duplicate_guard *.json
+recursive-include duplicate_guard *.md
+recursive-include duplicate_guard *.png
+recursive-include duplicate_guard *.py
+recursive-include duplicate_guard *.svg
+recursive-include duplicate_guard *.txt
+recursive-exclude duplicate_guard *.pyc
