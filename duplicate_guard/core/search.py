@@ -28,6 +28,21 @@ check is therefore a handful of index look-ups, each O(log n) - constant-ish
 regardless of how many millions of rows exist. The index rows are maintained
 automatically whenever a guarded record is inserted, updated or deleted (see
 ``duplicate_guard/index.py``).
+
+Employee special-casing
+-----------------------
+Two HR rules live in this module (their configuration is in :mod:`utils`):
+
+* **Inactive employees are neither indexed nor checked.** :func:`collect_entries`
+  returns nothing for an Employee whose status is not active, so a resigned
+  person's name/phone/personal-email leave the index and free up for reuse (the
+  same person rejoining under a new record does not collide with their old one).
+  :func:`find_duplicates` also drops any match to a now-inactive employee, as a
+  safety net against a stale index row.
+* **Company-domain emails are exempt.** Official addresses (e.g.
+  ``@splashjetink.com``) are shared/reassigned between employees, so they are
+  skipped at collection - never indexed, never matched. Personal employee emails
+  are still enforced (among active employees).
 """
 
 from collections import namedtuple
@@ -35,7 +50,12 @@ from collections import namedtuple
 import frappe
 
 from duplicate_guard.core import metadata, normalizer
-from duplicate_guard.core.utils import get_check_types, get_phone_config
+from duplicate_guard.core.utils import (
+    EMPLOYEE_ACTIVE_STATUSES,
+    EMPLOYEE_EMAIL_EXEMPT_DOMAINS,
+    get_check_types,
+    get_phone_config,
+)
 
 INDEX_DOCTYPE = "Duplicate Index"
 
@@ -59,6 +79,31 @@ Match = namedtuple(
 )
 
 
+def _employee_is_active(doc):
+    """Return ``True`` when an Employee document is in an active status.
+
+    Used to decide whether an Employee participates in duplicate detection at
+    all. Only active employees are indexed and checked; resigned/left/inactive
+    employees are skipped so their details free up for reuse.
+    """
+    return doc.get("status") in EMPLOYEE_ACTIVE_STATUSES
+
+
+def _is_exempt_employee_email(doctype, email):
+    """Return ``True`` for a company-domain email on an Employee (exempt).
+
+    Official company addresses are legitimately shared and reassigned between
+    employees, so they are never indexed or blocked. All other (personal)
+    employee emails are still enforced. Non-Employee DocTypes are never exempt.
+    """
+    if doctype != "Employee":
+        return False
+    if not email or "@" not in email:
+        return False
+    domain = email.rsplit("@", 1)[-1].lower()
+    return domain in EMPLOYEE_EMAIL_EXEMPT_DOMAINS
+
+
 def collect_entries(doc):
     """Return the de-duplicated list of :class:`Entry` values for ``doc``.
 
@@ -73,6 +118,9 @@ def collect_entries(doc):
       Contact whose Mobile, Phone and a grid row all hold ``9876543210`` yields a
       single Phone entry - that is valid and must never be flagged.
 
+    Employee rules (see module docstring): an inactive employee yields no
+    entries at all, and a company-domain email on an employee is skipped.
+
     Empty / blank fields are ignored.
 
     :param doc: a Frappe document (``frappe.model.document.Document``) or any
@@ -80,6 +128,13 @@ def collect_entries(doc):
     :returns: list of unique :class:`Entry`.
     """
     doctype = doc.doctype
+
+    # Inactive employees are neither indexed nor checked: their name / phone /
+    # personal email are considered "freed up" so a rejoining hire (or an
+    # address reassignment) may reuse them. Only active employees participate.
+    if doctype == "Employee" and not _employee_is_active(doc):
+        return []
+
     check_types = get_check_types(doctype)
     country_code, national_len, region = get_phone_config()
 
@@ -93,6 +148,11 @@ def collect_entries(doc):
 
     def _add(value_type, normalized_value, source_field):
         if not normalized_value:
+            return
+        # Company-domain emails on Employees are exempt: never indexed, never
+        # matched, so an official address can sit on several employees and be
+        # reassigned from a resigned employee to a new one.
+        if value_type == "Email" and _is_exempt_employee_email(doctype, normalized_value):
             return
         key = (value_type, normalized_value)
         if key in seen:
@@ -167,6 +227,8 @@ def find_duplicates(entries, scopes, exclude=None):
     * Cross-field and cross-DocType detection fall out naturally: within a scope,
       the query cares only that the normalized value matches, not which field or
       DocType it came from.
+    * A final pass drops matches to inactive employees (see
+      :func:`_filter_active_employee_matches`).
     """
     entries = list(entries)
     scopes = [s for s in (scopes or []) if s]
@@ -217,7 +279,7 @@ def find_duplicates(entries, scopes, exclude=None):
 
     rows = frappe.db.sql(query, params, as_dict=True)
 
-    return [
+    matches = [
         Match(
             value_type=row["value_type"],
             normalized_value=row["normalized_value"],
@@ -227,3 +289,32 @@ def find_duplicates(entries, scopes, exclude=None):
         )
         for row in rows
     ]
+
+    return _filter_active_employee_matches(matches)
+
+
+def _filter_active_employee_matches(matches):
+    """Drop matches that point to an Employee who is not currently active.
+
+    Employee name / phone / personal-email uniqueness is enforced only against
+    active staff, so a resigned employee's details free up for reuse (e.g. by
+    the same person rejoining under a new Employee record). Inactive employees
+    are not indexed in the first place; this is a safety net in case an index
+    row is stale (a status change that did not trigger a re-index). Matches to
+    every other DocType pass through untouched.
+    """
+    if not matches:
+        return matches
+
+    filtered = []
+    status_cache = {}
+    for m in matches:
+        if m.reference_doctype == "Employee":
+            status = status_cache.get(m.reference_name)
+            if status is None:
+                status = frappe.db.get_value("Employee", m.reference_name, "status")
+                status_cache[m.reference_name] = status
+            if status not in EMPLOYEE_ACTIVE_STATUSES:
+                continue
+        filtered.append(m)
+    return filtered

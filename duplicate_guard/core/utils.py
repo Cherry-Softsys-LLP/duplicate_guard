@@ -23,23 +23,27 @@ DEFAULT_GUARDED_DOCTYPES = ["Customer", "Lead", "Supplier", "Employee", "Contact
 #   Customer -> customer_name        (Sales)
 #   Lead     -> company_name         (Sales, organization name only)
 #   Supplier -> supplier_name        (Purchase)
-#   Employee -> (none)               people share names; HR dedupes phone/email only
+#   Employee -> employee_name        (HR, enforced among ACTIVE employees only)
 #   Contact  -> (none)               a Contact is a person; phone/email only
 DEFAULT_NAME_FIELDS = {
     "Customer": ["customer_name"],
     "Lead": ["company_name"],
     "Supplier": ["supplier_name"],
+    "Employee": ["employee_name"],
 }
 
 # Which value types each DocType contributes.
 #   Customer / Supplier -> Name only (phones/emails live on their Contacts)
-#   Lead / Employee     -> phone/email live directly on the record
+#   Lead                -> phone/email live directly on the record
+#   Employee            -> name/phone/email live directly on the record; name
+#                          and phone are enforced among ACTIVE employees only,
+#                          and company-domain emails are exempt (see below)
 #   Contact             -> phone/email only (never a person's name)
 DEFAULT_CHECK_TYPES = {
     "Customer": {"Name"},
     "Lead": {"Name", "Phone", "Email"},
     "Supplier": {"Name"},
-    "Employee": {"Phone", "Email"},
+    "Employee": {"Name", "Phone", "Email"},
     "Contact": {"Phone", "Email"},
 }
 
@@ -55,6 +59,25 @@ DEFAULT_FUNCTION_BY_DOCTYPE = {
 
 # Scope used for a Contact that is not linked to any known-function party.
 CONTACT_FALLBACK_SCOPE = "Contact"
+
+# ---------------------------------------------------------------------------
+# Employee-specific rules
+# ---------------------------------------------------------------------------
+# Email domains that are EXEMPT from duplicate checks *for Employees*. Official
+# company addresses are legitimately shared and reassigned (a resigned
+# employee's address is handed to a new hire), so they are never indexed and
+# never blocked. Every OTHER (personal) employee email must still be unique
+# among active employees. Compared case-insensitively against the address's
+# domain part. Edit this set if your company uses more official domains.
+EMPLOYEE_EMAIL_EXEMPT_DOMAINS = {"splashjetink.com", "splashjet-ink.com"}
+
+# Employee statuses that count as "currently employed". Name / phone / personal
+# email uniqueness is enforced ONLY against employees in one of these statuses,
+# so a resigned person's details free up for reuse (including by the same person
+# rejoining under a new Employee record). ERPNext's Employee.status options are
+# "Active", "Inactive", "Suspended" and "Left"; add "Suspended"/"Inactive" here
+# if you want those to keep reserving a person's details.
+EMPLOYEE_ACTIVE_STATUSES = {"Active"}
 
 
 def get_settings():

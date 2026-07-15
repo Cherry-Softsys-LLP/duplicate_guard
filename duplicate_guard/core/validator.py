@@ -23,7 +23,7 @@ programmatic ``doc.insert()`` / ``doc.save()``.
 
 import frappe
 from frappe import _
-from frappe.utils import now
+from frappe.utils import escape_html, now
 
 from duplicate_guard.core import search
 from duplicate_guard.core.exceptions import DuplicateError
@@ -41,6 +41,16 @@ _TYPE_LABEL = {
     "Name": _("Name"),
     "Phone": _("Phone Number"),
     "Email": _("Email"),
+}
+
+# Title field used to show a friendly party name for each linked DocType.
+# For Lead we prefer the organization name and fall back to the person's name.
+_PARTY_TITLE_FIELD = {
+    "Customer": "customer_name",
+    "Supplier": "supplier_name",
+    "Lead": "company_name",
+    "Employee": "employee_name",
+    "Contact": "",  # Contacts are described via their linked party instead.
 }
 
 
@@ -129,30 +139,90 @@ def _linked_party_exclusions(contact_doc):
     return exclusions
 
 
-def _match_title(match):
-    """Return a friendly display name for the matched record.
+def _party_title(doctype, name):
+    """Return a human-friendly name for a party record, with sensible fallbacks.
 
-    Tries the DocType's ``title_field`` first (e.g. ``customer_name`` /
-    ``lead_name`` / ``company_name``), then falls back to the record id.
+    Tries the mapped field (e.g. ``customer_name`` / ``company_name``), then the
+    DocType's ``title_field``, and finally the record id.
     """
-    meta = frappe.get_meta(match.reference_doctype)
-    title_field = meta.get("title_field")
-    title = None
-    if title_field:
-        title = frappe.db.get_value(
-            match.reference_doctype, match.reference_name, title_field
-        )
-    return title or match.reference_name
+    field = _PARTY_TITLE_FIELD.get(doctype)
+    title = frappe.db.get_value(doctype, name, field) if field else None
+    if not title and doctype == "Lead":
+        title = frappe.db.get_value("Lead", name, "lead_name")
+    if not title:
+        meta = frappe.get_meta(doctype)
+        tf = meta.get("title_field")
+        if tf:
+            title = frappe.db.get_value(doctype, name, tf)
+    return title or name
+
+
+def _contact_party(contact_name):
+    """Resolve the most meaningful party a Contact is linked to.
+
+    Returns a ``(doctype, name)`` tuple, preferring a real business party
+    (Customer/Supplier/Lead/Employee) over any other link, or ``None`` when the
+    Contact has no usable links.
+    """
+    links = frappe.get_all(
+        "Dynamic Link",
+        filters={
+            "parenttype": "Contact",
+            "parent": contact_name,
+            "parentfield": "links",
+        },
+        fields=["link_doctype", "link_name"],
+    )
+    links = [l for l in links if l.link_doctype and l.link_name]
+    if not links:
+        return None
+
+    preferred = ("Customer", "Supplier", "Lead", "Employee")
+    links.sort(
+        key=lambda l: preferred.index(l.link_doctype)
+        if l.link_doctype in preferred
+        else len(preferred)
+    )
+    top = links[0]
+    return (top.link_doctype, top.link_name)
+
+
+def _describe_existing(match):
+    """Return an HTML description of the record that already holds the value.
+
+    Examples::
+
+        Customer <b>ABC Industries</b> (via Contact <b>Ameya Khedkar</b>)
+        Lead <b>XYZ Corp</b>
+        Employee <b>John Doe</b>
+    """
+    if match.reference_doctype == "Contact":
+        contact_label = _party_title("Contact", match.reference_name)
+        party = _contact_party(match.reference_name)
+        if party:
+            pdoctype, pname = party
+            return _("{0} {1} (via Contact {2})").format(
+                pdoctype,
+                frappe.bold(escape_html(_party_title(pdoctype, pname))),
+                frappe.bold(escape_html(contact_label)),
+            )
+        return _("Contact {0}").format(frappe.bold(escape_html(contact_label)))
+
+    return _("{0} {1}").format(
+        match.reference_doctype,
+        frappe.bold(escape_html(_party_title(match.reference_doctype, match.reference_name))),
+    )
 
 
 def _raise_duplicate_error(doc, matches, entries):
-    """Build a meaningful message and raise :class:`DuplicateError`.
+    """Build a clear, user-facing message and raise :class:`DuplicateError`.
 
-    Example message::
+    Example popup::
 
-        Duplicate Phone Number "9876543210" already exists.
-        Existing: Customer CUST-00045 (ABC Industries - Sitabuldi)
-        Conflicting field on this Lead: whatsapp
+        Duplicate Phone Number
+        Phone Number +919225144953 is already in use.
+        It belongs to Customer Ameya Enterprises (via Contact Ameya Khedkar).
+        Conflicting field on this Contact: phone_nos.phone
     """
     # Map (value_type, normalized_value) -> the field on the CURRENT doc that
     # produced it, so we can tell the user exactly which of their fields clashed.
@@ -162,39 +232,47 @@ def _raise_duplicate_error(doc, matches, entries):
 
     first = matches[0]
     type_label = _TYPE_LABEL.get(first.value_type, first.value_type)
-    existing_title = _match_title(first)
     current_field = source_by_value.get(
         (first.value_type, first.normalized_value), first.source_field
     )
 
     lines = [
-        _("Duplicate {0} \"{1}\" already exists.").format(
-            type_label, first.normalized_value
+        _("{0} {1} is already in use.").format(
+            type_label, frappe.bold(escape_html(first.normalized_value))
         ),
-        _("Existing: {0} {1} ({2})").format(
-            first.reference_doctype, first.reference_name, existing_title
-        ),
-        _("Conflicting field on this {0}: {1}").format(doc.doctype, current_field),
+        _("It belongs to {0}.").format(_describe_existing(first)),
     ]
+    if current_field:
+        lines.append(
+            _("Conflicting field on this {0}: {1}").format(
+                doc.doctype, frappe.bold(escape_html(current_field))
+            )
+        )
 
     # If several distinct values clashed, summarise the rest so nothing is
     # hidden from the user.
     if len(matches) > 1:
         others = _summarise_extra_matches(matches[1:])
         if others:
-            lines.append(_("Other conflicts:"))
+            lines.append(_("Other conflicting values:"))
             lines.extend(others)
 
-    message = "\n".join(lines)
+    message = "<br>".join(lines)
+    title = _("Duplicate {0}").format(type_label)
 
+    # Show a clean, formatted red popup in the desk (and return it via the REST
+    # API / Data Import), then raise so the save is aborted. Because
+    # ``DuplicateError`` subclasses ``frappe.ValidationError`` this is handled as
+    # a validation failure, not a server error. The structured match list stays
+    # attached to the exception for programmatic callers and tests.
+    frappe.msgprint(message, title=title, indicator="red")
     error = DuplicateError(message)
-    # Attach structured details for programmatic callers and tests.
     error.duplicate_matches = matches
     raise error
 
 
 def _summarise_extra_matches(matches):
-    """Return de-duplicated one-line summaries for additional matches."""
+    """Return de-duplicated one-line HTML summaries for additional matches."""
     seen = set()
     lines = []
     for m in matches:
@@ -204,8 +282,10 @@ def _summarise_extra_matches(matches):
         seen.add(key)
         type_label = _TYPE_LABEL.get(m.value_type, m.value_type)
         lines.append(
-            _("- {0} \"{1}\" on {2} {3}").format(
-                type_label, m.normalized_value, m.reference_doctype, m.reference_name
+            _("&bull; {0} {1} — {2}").format(
+                type_label,
+                frappe.bold(escape_html(m.normalized_value)),
+                _describe_existing(m),
             )
         )
     return lines
