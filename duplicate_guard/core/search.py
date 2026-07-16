@@ -39,10 +39,11 @@ Two HR rules live in this module (their configuration is in :mod:`utils`):
   same person rejoining under a new record does not collide with their old one).
   :func:`find_duplicates` also drops any match to a now-inactive employee, as a
   safety net against a stale index row.
-* **Company-domain emails are exempt.** Official addresses (e.g.
-  ``@splashjetink.com``) are shared/reassigned between employees, so they are
-  skipped at collection - never indexed, never matched. Personal employee emails
-  are still enforced (among active employees).
+* **Company-domain emails are exempt.** Official addresses are shared and
+  reassigned between employees, so any address on a domain listed in the
+  ``employee_email_exempt_domains`` setting is skipped at collection - never
+  indexed, never matched. Personal employee emails are still enforced (among
+  active employees).
 """
 
 from collections import namedtuple
@@ -51,10 +52,10 @@ import frappe
 
 from duplicate_guard.core import metadata, normalizer
 from duplicate_guard.core.utils import (
-    EMPLOYEE_ACTIVE_STATUSES,
-    EMPLOYEE_EMAIL_EXEMPT_DOMAINS,
     get_check_types,
-    get_phone_config,
+    get_employee_active_statuses,
+    get_employee_exempt_email_domains,
+    get_phone_config_for,
 )
 
 INDEX_DOCTYPE = "Duplicate Index"
@@ -86,7 +87,7 @@ def _employee_is_active(doc):
     all. Only active employees are indexed and checked; resigned/left/inactive
     employees are skipped so their details free up for reuse.
     """
-    return doc.get("status") in EMPLOYEE_ACTIVE_STATUSES
+    return doc.get("status") in get_employee_active_statuses()
 
 
 def _is_exempt_employee_email(doctype, email):
@@ -101,7 +102,7 @@ def _is_exempt_employee_email(doctype, email):
     if not email or "@" not in email:
         return False
     domain = email.rsplit("@", 1)[-1].lower()
-    return domain in EMPLOYEE_EMAIL_EXEMPT_DOMAINS
+    return domain in get_employee_exempt_email_domains()
 
 
 def collect_entries(doc):
@@ -136,7 +137,10 @@ def collect_entries(doc):
         return []
 
     check_types = get_check_types(doctype)
-    country_code, national_len, region = get_phone_config()
+    # Phone region is resolved PER RECORD from its country field (see
+    # ``utils.get_phone_config_for``), so a UK lead's bare national number is not
+    # read as an Indian one on an India-defaulted site.
+    country_code, national_len, region = get_phone_config_for(doc)
 
     field_map = metadata.get_field_map(doctype)
 
@@ -306,6 +310,7 @@ def _filter_active_employee_matches(matches):
     if not matches:
         return matches
 
+    active_statuses = get_employee_active_statuses()
     filtered = []
     status_cache = {}
     for m in matches:
@@ -314,7 +319,7 @@ def _filter_active_employee_matches(matches):
             if status is None:
                 status = frappe.db.get_value("Employee", m.reference_name, "status")
                 status_cache[m.reference_name] = status
-            if status not in EMPLOYEE_ACTIVE_STATUSES:
+            if status not in active_statuses:
                 continue
         filtered.append(m)
     return filtered

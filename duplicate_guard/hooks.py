@@ -17,23 +17,30 @@ background jobs, ``bench execute``, Server Scripts, or a raw ``doc.insert()``.
 # ---------------------------------------------------------------------------
 app_name = "duplicate_guard"
 app_title = "Duplicate Guard"
-app_publisher = "Your Company"
-app_description = "Prevent duplicate Leads and Customers in ERPNext (v15 & v16)."
-app_email = "support@example.com"
+app_publisher = "Your Company"          # TODO: set before publishing
+app_description = (
+    "Prevent duplicate customers, leads, suppliers, employees and contacts in "
+    "ERPNext, scoped per business function."
+)
+app_email = "support@example.com"       # TODO: set before publishing
 app_license = "MIT"
-app_version = "1.0.0"
+app_version = "1.1.0"
 
-# Minimum Frappe/ERPNext line this app is built and tested against.
-required_apps = ["frappe"]
+# ERPNext is a hard requirement, not an optional extra: every DocType this app
+# guards out of the box (Customer, Lead, Supplier, Employee) is defined by
+# ERPNext. Declaring only "frappe" would let the app install onto a bare Frappe
+# site, where it would then fail the moment anything touched a guarded DocType.
+required_apps = ["frappe", "erpnext"]
 
 # ---------------------------------------------------------------------------
 # Document events
 # ---------------------------------------------------------------------------
 # For each DocType we hook:
 #   validate      -> run the duplicate check (may reject the save)
-#   before_insert -> legacy-id safety net
+#   before_insert -> legacy-id safety net (opt-in field only)
 #   after_insert  -> add the record's normalized values to the index
 #   on_update     -> refresh the record's index rows
+#   after_rename  -> move the index rows to the record's new name
 #   on_trash      -> remove the record's index rows
 #
 # To guard an additional DocType later, add a block here mirroring these two,
@@ -45,6 +52,7 @@ doc_events = {
         "validate": "duplicate_guard.handlers.customer.validate_customer",
         "after_insert": "duplicate_guard.core.index.sync_document",
         "on_update": "duplicate_guard.core.index.sync_document",
+        "after_rename": "duplicate_guard.core.index.sync_on_rename",
         "on_trash": "duplicate_guard.core.index.delete_index_on_trash",
     },
     "Lead": {
@@ -52,6 +60,7 @@ doc_events = {
         "validate": "duplicate_guard.handlers.lead.validate_lead",
         "after_insert": "duplicate_guard.core.index.sync_document",
         "on_update": "duplicate_guard.core.index.sync_document",
+        "after_rename": "duplicate_guard.core.index.sync_on_rename",
         "on_trash": "duplicate_guard.core.index.delete_index_on_trash",
     },
     # Contact holds the phone/email for Customers (and any party). Guarding it is
@@ -61,6 +70,7 @@ doc_events = {
         "validate": "duplicate_guard.handlers.contact.validate_contact",
         "after_insert": "duplicate_guard.core.index.sync_document",
         "on_update": "duplicate_guard.core.index.sync_document",
+        "after_rename": "duplicate_guard.core.index.sync_on_rename",
         "on_trash": "duplicate_guard.core.index.delete_index_on_trash",
     },
     # Supplier = the Purchase function. Name checked here; phone/email come via
@@ -69,6 +79,7 @@ doc_events = {
         "validate": "duplicate_guard.handlers.supplier.validate_supplier",
         "after_insert": "duplicate_guard.core.index.sync_document",
         "on_update": "duplicate_guard.core.index.sync_document",
+        "after_rename": "duplicate_guard.core.index.sync_on_rename",
         "on_trash": "duplicate_guard.core.index.delete_index_on_trash",
     },
     # Employee = the HR function. Contact details live directly on the Employee.
@@ -76,6 +87,7 @@ doc_events = {
         "validate": "duplicate_guard.handlers.employee.validate_employee",
         "after_insert": "duplicate_guard.core.index.sync_document",
         "on_update": "duplicate_guard.core.index.sync_document",
+        "after_rename": "duplicate_guard.core.index.sync_on_rename",
         "on_trash": "duplicate_guard.core.index.delete_index_on_trash",
     },
     # When a DocType's schema changes (or a Custom Field is added/removed), drop
@@ -98,18 +110,10 @@ after_migrate = "duplicate_guard.setup.install.after_migrate"
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-# Export the legacy custom fields so they travel with the app between sites.
-fixtures = [
-    {
-        "doctype": "Custom Field",
-        "filters": {
-            "name": [
-                "in",
-                [
-                    "Customer-legacy_yetiforce_id",
-                    "Lead-legacy_yetiforce_id",
-                ],
-            ]
-        },
-    }
-]
+# Deliberately none.
+#
+# The legacy-id custom field used to be exported here. It must not be: it is an
+# opt-in migration aid (see setup/install.py), so exporting it as a fixture would
+# push a "Legacy ID" field onto the Customer and Lead forms of every site that
+# installs this app - including the great majority that are not migrating from
+# anywhere and would have no idea what it was for.

@@ -37,11 +37,21 @@ from duplicate_guard.core.utils import (
 REPORT_DOCTYPE = "Duplicate Report"
 
 # Human-readable labels for each value type, used in error messages.
-_TYPE_LABEL = {
-    "Name": _("Name"),
-    "Phone": _("Phone Number"),
-    "Email": _("Email"),
+#
+# Resolved by :func:`_type_label` at call time, never at import time: calling
+# ``_()`` while this module is being imported would bake in whatever language
+# happened to be active for the first request the worker served, and every later
+# user would then see that language regardless of their own.
+_TYPE_LABELS = {
+    "Name": "Name",
+    "Phone": "Phone Number",
+    "Email": "Email",
 }
+
+
+def _type_label(value_type):
+    """Return the translated, human-readable label for a value type."""
+    return _(_TYPE_LABELS.get(value_type, value_type))
 
 # Title field used to show a friendly party name for each linked DocType.
 # For Lead we prefer the organization name and fall back to the person's name.
@@ -78,7 +88,7 @@ def validate_document(doc, extra_exclude=None):
         return
 
     if is_migration_mode():
-        _record_migration_reports(doc, matches)
+        _record_migration_reports(doc, matches, entries)
         return
 
     # Strict Mode (the default): reject with a detailed message built from the
@@ -231,7 +241,7 @@ def _raise_duplicate_error(doc, matches, entries):
     }
 
     first = matches[0]
-    type_label = _TYPE_LABEL.get(first.value_type, first.value_type)
+    type_label = _type_label(first.value_type)
     current_field = source_by_value.get(
         (first.value_type, first.normalized_value), first.source_field
     )
@@ -260,15 +270,17 @@ def _raise_duplicate_error(doc, matches, entries):
     message = "<br>".join(lines)
     title = _("Duplicate {0}").format(type_label)
 
-    # Show a clean, formatted red popup in the desk (and return it via the REST
-    # API / Data Import), then raise so the save is aborted. Because
-    # ``DuplicateError`` subclasses ``frappe.ValidationError`` this is handled as
-    # a validation failure, not a server error. The structured match list stays
-    # attached to the exception for programmatic callers and tests.
-    frappe.msgprint(message, title=title, indicator="red")
-    error = DuplicateError(message)
-    error.duplicate_matches = matches
-    raise error
+    # Expose the structured match list to programmatic callers (tests, imports)
+    # that want the detail rather than the rendered message.
+    frappe.local.duplicate_guard_matches = matches
+
+    # ``frappe.throw`` displays the formatted message AND raises, in one step.
+    # Calling ``msgprint`` and then raising separately would show the user two
+    # dialogs for one problem. Because ``DuplicateError`` subclasses
+    # ``frappe.ValidationError``, the desk, the REST API and the Data Import tool
+    # all treat this as an ordinary validation failure rather than a server
+    # error, while our own code and tests can still catch the specific class.
+    frappe.throw(message, exc=DuplicateError, title=title)
 
 
 def _summarise_extra_matches(matches):
@@ -280,7 +292,7 @@ def _summarise_extra_matches(matches):
         if key in seen:
             continue
         seen.add(key)
-        type_label = _TYPE_LABEL.get(m.value_type, m.value_type)
+        type_label = _type_label(m.value_type)
         lines.append(
             _("&bull; {0} {1} — {2}").format(
                 type_label,
@@ -291,13 +303,20 @@ def _summarise_extra_matches(matches):
     return lines
 
 
-def _record_migration_reports(doc, matches):
+def _record_migration_reports(doc, matches, entries=None):
     """Create *Duplicate Report* rows for each collision (Migration Mode).
 
     In Migration Mode we never block the save; instead every collision becomes a
     report row an administrator can review later. Rows are de-duplicated so
     re-saving the same record does not pile up identical reports.
+
+    ``entries`` is the already-collected value list for ``doc``; passing it in
+    avoids re-normalizing the whole document once per match.
     """
+    source_by_value = {
+        (e.value_type, e.normalized_value): e.source_field for e in (entries or [])
+    }
+
     for match in matches:
         filters = {
             "reference_doctype": doc.doctype,
@@ -312,7 +331,9 @@ def _record_migration_reports(doc, matches):
 
         report = frappe.new_doc(REPORT_DOCTYPE)
         report.update(filters)
-        report.source_field = _current_source_field(doc, match)
+        report.source_field = source_by_value.get(
+            (match.value_type, match.normalized_value)
+        ) or _current_source_field(doc, match)
         report.matched_field = match.source_field
         report.status = "Open"
         report.detected_on = now()

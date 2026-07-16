@@ -1,137 +1,156 @@
 # Troubleshooting Guide
 
-Symptoms, likely causes and fixes. Commands assume you are inside `frappe-bench`;
-replace `yoursite` with your site name.
-
 ---
 
-### Duplicates are not being blocked at all
+## "It let me save a duplicate"
 
-1. **Guard disabled or in Migration Mode.** Open *Duplicate Guard Settings*.
-   For blocking behaviour you need *Enabled* on, *Strict Mode* on, *Migration
-   Mode* off.
-2. **The DocType is not guarded.** Check *Guarded DocTypes* lists the DocType,
-   and that `hooks.py` has a `doc_events` block for it. A DocType listed in
-   settings but missing from `hooks.py` is never intercepted.
-3. **Existing data was never indexed.** If the "existing" record predates the
-   install, it may not be in `Duplicate Index`. Rebuild:
-   `bench --site yoursite execute duplicate_guard.api.rebuild_all_indexes`.
-4. **Workers not restarted after a code change.** `bench restart` (or restart
-   `bench start`).
+Work through these in order — the first three explain almost every report.
 
----
+**1. Are the two records in the same function scope?**
 
-### A save is blocked but the two records are genuinely different
+Two *Customers* with the same phone do **not** collide, and that is correct. In
+ERPNext a Customer's phone/email live on its linked **Contact**, not on the
+Customer, so Sales phone dedup flows through Contacts. Test with two Contacts or
+two Leads. Likewise an Employee and a Supplier never collide — different
+functions.
 
-- **Phone false match.** With country-code-aware normalization this is rare, but
-  check *Default Region* / *Default Country Code*: if two bare (no `+`) numbers
-  from different countries are both being interpreted with the same default
-  region, they can collapse together. Store numbers with their `+CC` prefix
-  (convert the field to the Phone type) and set the correct default region, then
-  rebuild the index.
-- **Phone numbers that should match no longer do (after upgrade).** If you
-  upgraded to the E.164 version and did not rebuild, old rows still hold bare
-  national digits while new saves hold `+CC...` form. Rebuild once:
-  `bench --site yoursite execute duplicate_guard.api.rebuild_all_indexes`.
-- **Name false match.** Two entities share a normalized name (case/spacing
-  removed). This is by design — decide which record should keep the name, or use
-  a more specific name.
-- Read the error message: it names the value, the existing record, and the field.
-  That tells you exactly which value triggered it.
+**2. Is the index built?**
 
----
-
-### Editing and re-saving a record raises a duplicate error against itself
-
-This should never happen — the validator always excludes the current document. If
-it does:
-
-- Confirm you are on the latest app code (`git log` in `apps/duplicate_guard`)
-  and have run `bench restart`.
-- Rebuild the index to clear any stale rows:
-  `bench --site yoursite execute duplicate_guard.api.rebuild_all_indexes`.
-
----
-
-### Lead conversion is blocked by the originating Lead
-
-The validator ignores the originating Lead only when the new Customer’s
-`lead_name` field points at that Lead. If your conversion flow does not set
-`Customer.lead_name`, the link is missing and the Lead looks like any other
-record. Ensure the conversion populates `lead_name` with the source Lead’s id.
-
----
-
-### Legacy import creates duplicates instead of updating
-
-- Make sure you are calling `duplicate_guard.api.upsert_by_legacy_id`, not a
-  plain `insert` / the Data Import tool. Only the upsert helper matches on
-  `legacy_yetiforce_id`.
-- Confirm each source row actually carries a non-empty `legacy_yetiforce_id`.
-- Confirm the `legacy_yetiforce_id` custom field exists on the DocType
-  (`bench --site yoursite execute duplicate_guard.setup.install.after_migrate`
-  recreates it if missing).
-
----
-
-### "A Customer/Lead with Legacy YetiForce ID … already exists"
-
-That is the legacy guard doing its job: a plain insert tried to reuse a legacy id.
-Use `upsert_by_legacy_id` to update the existing record instead.
-
----
-
-### Newly added custom phone/email field is not being checked
-
-The field-map cache should clear automatically when you save a Custom Field. If
-it did not:
+A fresh install on an existing site has an **empty** index, so nothing matches:
 
 ```bash
-bench --site yoursite clear-cache
-bench --site yoursite execute duplicate_guard.core.metadata.clear_field_cache
+bench --site yoursite execute duplicate_guard.api.setup_existing_site
 ```
 
-Also confirm the field is actually a *Phone*/*Email*-typed field: a *Data* field
-needs its *Options* set to `Phone` or `Email` to be discovered.
+**3. Is Migration Mode on?**
 
----
+It logs instead of blocking — by design. Check Duplicate Guard Settings; the
+banner at the top of the form tells you the current mode. If a row appeared in
+**Duplicate Report** for your test, the engine is working correctly and Migration
+Mode simply let it through.
 
-### Performance feels slow on a very large site
+**4. Is the value really on two different records?**
 
-- Ensure the composite index exists. It is created by `on_doctype_update`; force
-  it with `bench --site yoursite migrate`. You can verify in MariaDB:
-  `SHOW INDEX FROM \`tabDuplicate Index\`;` — look for `crm_dg_type_value`.
-- Ensure the index is populated (`SELECT COUNT(*) FROM \`tabDuplicate Index\`;`
-  should be in the same order of magnitude as your Customers + Leads times the
-  number of checked values per record).
-- Rebuild with a larger batch size to speed up the back-fill:
-  `--kwargs "{'doctype':'Customer','batch_size':10000}"`.
+The same number twice on *one* record is valid and never flagged. So is a
+Contact carrying its own Lead's number, or a Customer sharing a name with the
+Lead it was converted from — those are the same entity wearing two hats.
 
----
+**5. Is it an inactive employee?**
 
-### Lead creation fails via REST/import even though it's not a duplicate
+Deliberate: a resigned employee's details are released for reuse. See
+[CONFIGURATION.md](CONFIGURATION.md#employee-hr-rules).
 
-ERPNext requires every Lead to have a **Person Name** (`first_name`) or an
-organization name (`company_name` with the organization option). A payload with
-neither fails with HTTP 417 (mandatory field) *before* the duplicate check runs.
-Add `first_name` (or `company_name`) to your import rows / API payloads. This is
-core ERPNext behaviour, independent of this app.
+**6. Is it a company-domain employee email?**
 
----
+Also deliberate — those are exempt.
 
-### Tests fail to create a Customer or Lead
-
-The integration tests need the standard ERPNext masters (root Customer Group /
-Territory). Run them on a site that has ERPNext installed, not a bare Frappe site:
+**7. Did you restart?**
 
 ```bash
-bench --site yoursite run-tests --app duplicate_guard
+bench restart
+```
+
+Without it the workers run the old code.
+
+---
+
+## "It blocks a value I cannot find on any record"
+
+The index is stale — it still describes data that has changed. Rebuild:
+
+```bash
+bench --site yoursite execute duplicate_guard.api.rebuild_all_indexes
+```
+
+This should be rare. If it recurs, please report it.
+
+---
+
+## "Two different people share a name and it blocks them"
+
+Expected for Employee name checking. Turn off **Check Employee Names** in
+settings; phone and personal email keep working.
+
+---
+
+## "My shared mailbox is being blocked"
+
+Set **Company Email Domains (Exempt)** in settings. Blank means no exemption.
+
+---
+
+## "A save is blocked but I cannot tell why"
+
+The message names the value and the record that holds it. If it does not appear,
+check the browser console and `bench --site yoursite console` logs, and confirm
+you restarted after updating.
+
+---
+
+## "bench migrate says the index is out of date"
+
+An app update changed what gets indexed. Run what it tells you:
+
+```bash
+bench --site yoursite execute duplicate_guard.api.rebuild_all_indexes
 ```
 
 ---
 
-### Getting more detail
+## Legacy import problems
 
-Check the site error log in the UI (**Error Log** list) or the file logs under
-`frappe-bench/logs/`. When reporting an issue, include the full Strict-Mode error
-message and the output of `bench version`.
+The legacy id field is **opt-in**. If `upsert_by_legacy_id` says it is not
+enabled:
+
+```json
+// sites/yoursite/site_config.json
+{ "duplicate_guard_enable_legacy_id": 1 }
+```
+
+```bash
+bench --site yoursite migrate
+```
+
+Then confirm every source row carries a non-empty `legacy_id`, and that the CSV
+header uses ERPNext **fieldnames**.
+
+### "A Customer/Lead with Legacy ID … already exists"
+
+Something tried a plain insert reusing a legacy id. Use the upsert API instead —
+that is what it is for.
+
+---
+
+## Useful diagnostics
+
+```bash
+bench --site yoursite console
+```
+
+```python
+# What mode am I in?
+s = frappe.get_single("Duplicate Guard Settings")
+print(s.enabled, s.strict_mode, s.migration_mode)
+
+# Is the value indexed, and under which scope?
+frappe.get_all("Duplicate Index",
+    filters={"normalized_value": "+919876543210"},
+    fields=["scope", "value_type", "reference_doctype", "reference_name"])
+
+# What fields are being checked on a DocType?
+from duplicate_guard.core.metadata import describe
+describe("Employee")
+
+# What duplicates already exist?
+from duplicate_guard.api import audit_duplicates
+audit_duplicates(limit=20)
+```
+
+---
+
+## Reporting a bug
+
+Please include: `bench version`, your Duplicate Guard Settings, the output of
+`describe("<DocType>")` for the DocType involved, and the exact steps. If a save
+is wrongly blocked or allowed, the `Duplicate Index` rows for the value involved
+are the single most useful thing to attach.

@@ -2,14 +2,15 @@
 duplicate_guard.scripts.import_legacy
 =========================================
 
-A ready-to-run CSV importer for legacy YetiForce data that **updates existing
-records instead of creating duplicates**, keyed on ``legacy_yetiforce_id``.
+A ready-to-run CSV importer for data migrated from a previous system that
+**updates existing records instead of creating duplicates**, keyed on
+``legacy_id``.
 
 Why this exists
 ---------------
 ERPNext's built-in Data Import tool is great, but it can only *update* existing
 records by matching on the ERPNext record id (``name``) - it cannot match on a
-custom field like ``legacy_yetiforce_id``. So re-importing a legacy file through
+custom field like ``legacy_id``. So re-importing a legacy file through
 the built-in tool would try to create second copies (which our before_insert
 guard then blocks). This script routes each row through
 ``duplicate_guard.api.upsert_by_legacy_id`` instead, giving you true
@@ -19,14 +20,17 @@ How to use it
 -------------
 1. Put your CSV on the server (e.g. in the bench's ``sites`` folder). The header
    row must use ERPNext **fieldnames** as columns, and must include a
-   ``legacy_yetiforce_id`` column. Example for Lead::
+   ``legacy_id`` column. Example for Lead::
 
-       legacy_yetiforce_id,company_name,first_name,mobile_no,email_id
-       YF-1001,ABC Industries,Ravi,+91 9876543210,ravi@abc.com
-       YF-1002,XYZ Traders,Sunil,+91 9812345678,sunil@xyz.com
+       legacy_id,company_name,first_name,mobile_no,email_id
+       LEG-1001,ABC Industries,Ravi,+91 9876543210,ravi@abc.com
+       LEG-1002,XYZ Traders,Sunil,+91 9812345678,sunil@xyz.com
 
 2. (Recommended) turn on Migration Mode first, so cross-record duplicates are
    logged rather than failing rows.
+
+   The legacy id field is opt-in: set ``"duplicate_guard_enable_legacy_id": 1``
+   in site_config.json and run ``bench migrate`` before importing.
 
 3. Run it::
 
@@ -79,7 +83,7 @@ def run(
     :param doctype: target DocType, e.g. ``"Customer"`` or ``"Lead"``.
     :param file_path: path to the CSV file, relative to the bench folder or
         absolute. The header row must use ERPNext fieldnames and include
-        ``legacy_yetiforce_id``.
+        ``legacy_id``.
     :param batch_size: how many rows to hold in memory and upsert per batch.
     :param commit_every: commit to the database after this many rows within a
         batch.

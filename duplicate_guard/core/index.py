@@ -17,14 +17,29 @@ These functions are wired to Frappe document events in ``hooks.py``:
 
     after_insert -> sync_document
     on_update    -> sync_document
-    on_trash     -> delete_for
+    after_rename -> sync_on_rename
+    on_trash     -> delete_index_on_trash
+
+Index maintenance is unconditional
+----------------------------------
+Nothing here consults ``is_enabled()``. Keeping the index in step with the data
+is *bookkeeping*, not enforcement - :mod:`validator` is what decides whether to
+block a save, and it already does nothing when the guard is switched off.
+
+Gating index maintenance on that switch looks harmless and is not: an
+administrator turns the guard off precisely so they can clean up messy data, and
+every edit made while it was off would leave the index describing values that no
+longer exist anywhere. Switching the guard back on would then reject saves that
+collide with those phantom values - numbers that appear on no record, which is
+close to impossible to diagnose. So we always track reality; the switch only
+governs whether anyone is stopped.
 """
 
 import frappe
 from frappe.utils import now
 
 from duplicate_guard.core import search
-from duplicate_guard.core.utils import get_scopes, is_enabled, is_guarded
+from duplicate_guard.core.utils import get_scopes, is_guarded
 
 INDEX_DOCTYPE = "Duplicate Index"
 
@@ -55,10 +70,11 @@ def sync_document(doc, method=None):
 
     ``method`` is accepted because Frappe passes it to doc-event handlers.
     """
-    # Never index rows for a document type we do not guard, and skip entirely
-    # when the guard is globally disabled.
-    if not is_enabled():
-        return
+    # Never index rows for a document type we do not guard.
+    #
+    # Note there is deliberately NO ``is_enabled()`` check here: keeping the
+    # index in step with the data is bookkeeping, not enforcement. See the
+    # module docstring.
     if not is_guarded(doc.doctype):
         return
 
@@ -71,6 +87,32 @@ def sync_document(doc, method=None):
 
     delete_for(doc.doctype, doc.name)
     _index_document(doc)
+
+
+def sync_on_rename(doc, *args, **kwargs):
+    """``after_rename`` handler: move a record's index rows to its new name.
+
+    Renaming is common in ERPNext - a Customer named by its customer_name gets
+    renamed whenever that name is corrected. Frappe rewrites the record's
+    ``name`` but knows nothing about our index, so without this handler the old
+    rows keep pointing at a name that no longer exists. Those orphans still match
+    during a duplicate check, so the next person to use that phone number is
+    blocked and told it belongs to a record they cannot find. The rows are also
+    never cleaned up, because ``on_trash`` will only ever fire for the *new*
+    name.
+
+    Frappe calls ``after_rename`` as ``(doc, old_name, new_name, merge)``, but the
+    exact signature has moved between versions, so we accept anything and pick the
+    old name out of the positional arguments defensively.
+    """
+    if not is_guarded(doc.doctype):
+        return
+
+    old_name = args[0] if args else kwargs.get("old_name") or kwargs.get("olddn")
+    if old_name and old_name != doc.name:
+        delete_for(doc.doctype, old_name)
+
+    sync_document(doc)
 
 
 def _index_document(doc):

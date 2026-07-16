@@ -1,178 +1,202 @@
 # Installation Guide
 
-This guide assumes you have **never created or installed an ERPNext app** before.
-It explains every command. Do the steps in order and wait for each one to finish
-before starting the next.
+This guide assumes you have **never installed a custom ERPNext app** before. It
+explains every command. Do the steps in order and wait for each to finish.
 
-> Throughout, replace `yoursite` with your actual site name (the folder under
+> Replace `yoursite` with your actual site name (the folder under
 > `frappe-bench/sites/`, e.g. `mysite.localhost`).
+
+**If your site already has customers, leads, suppliers, employees or contacts,
+[Step 5](#5-if-your-site-already-has-data) is not optional.**
 
 ---
 
 ## 0. What you need first
 
-You need a working **Frappe/ERPNext v15 or v16 bench**. A "bench" is the
-workspace that holds the framework, your apps and your sites. If you already run
-ERPNext, you have one. If not, follow the official Frappe "Installation" docs to
-create a bench and a site with ERPNext installed, then come back here.
+A working **Frappe/ERPNext v15 or v16 bench**. ERPNext is required, not optional:
+every DocType this app guards (Customer, Lead, Supplier, Employee) is defined by
+ERPNext.
 
-Check your versions from inside the `frappe-bench` folder:
+From inside `frappe-bench`:
 
 ```bash
 bench version
 ```
 
-You should see `frappe 15.x.x` (or `16.x.x`) and `erpnext 15.x.x` (or `16.x.x`).
+You should see both `frappe` and `erpnext` at 15.x or 16.x.
 
-> **Frappe v16 note.** This app is compatible with both v15 and v16. On v16, the
-> whitelisted API methods that change data (`rebuild_index`,
-> `rebuild_all_indexes`, `upsert_by_legacy_id`) are POST-only, in line with v16's
-> rule that state-changing endpoints reject GET. `bench execute` is unaffected by
-> that rule; only direct HTTP/REST callers need to use POST.
-
----
-
-## 1. Get the app onto your bench
-
-An app must live inside `frappe-bench/apps/` before a site can use it. There are
-two common ways to put it there.
-
-### Option A — you have the app folder (this package)
-
-From **inside your `frappe-bench` folder**, run:
-
-```bash
-bench get-app duplicate_guard /path/to/duplicate_guard
-```
-
-- `bench get-app` copies (or clones) an app into `apps/` and registers it with
-  the bench (adds it to `sites/apps.txt` and installs its Python package into the
-  bench's virtual environment).
-- `duplicate_guard` is the app name.
-- `/path/to/duplicate_guard` is the folder containing this project (the
-  folder that has `pyproject.toml` in it).
-
-### Option B — start a brand-new empty app instead
-
-If you wanted to scaffold from scratch rather than use this package, the command
-is:
-
-```bash
-bench new-app duplicate_guard
-```
-
-- `bench new-app` creates a fresh, empty app skeleton under `apps/` and asks you
-  a few questions (title, publisher, license). It is the "File → New Project" of
-  Frappe. You would then copy the files from this package over the generated
-  skeleton. **If you used Option A, skip this.**
-
-Verify the app is present:
-
-```bash
-ls apps/duplicate_guard
-```
-
-You should see `duplicate_guard/`, `pyproject.toml`, `README.md`, etc.
+> **Frappe v16 note.** On v16, whitelisted methods that change data
+> (`rebuild_index`, `rebuild_all_indexes`, `setup_existing_site`,
+> `upsert_by_legacy_id`) are POST-only, in line with v16's rule that
+> state-changing endpoints reject GET. `bench execute` is unaffected.
 
 ---
 
-## 2. Install the app on your site
+## 1. Get the app into your bench
 
-Putting the app in `apps/` is not enough; each **site** must have it installed.
-Installing runs the app's database migrations (creating its DocTypes) and its
-`after_install` setup (creating custom fields and default settings).
+```bash
+cd ~/frappe-bench
+bench get-app duplicate_guard https://github.com/your-org/duplicate_guard
+```
+
+Or from a local folder:
+
+```bash
+bench get-app /path/to/duplicate_guard
+```
+
+This copies the code into `apps/duplicate_guard` and installs its Python
+dependency (`phonenumbers`) into the bench environment.
+
+---
+
+## 2. Install it on your site
 
 ```bash
 bench --site yoursite install-app duplicate_guard
 ```
 
-- `--site yoursite` targets one specific site.
-- `install-app duplicate_guard` creates the three DocTypes
-  (`Duplicate Guard Settings`, `Duplicate Index`, `Duplicate Report`),
-  adds the `legacy_yetiforce_id` custom field to Customer and Lead, and writes the
-  default settings (guard enabled, Strict Mode on, India phone defaults).
+This creates the three DocTypes (`Duplicate Guard Settings`, `Duplicate Index`,
+`Duplicate Report`) and writes a default settings record.
 
-If you see no errors, the app is installed.
+**Read the output.** The app inspects your data during installation and tells you
+which mode it chose:
 
-> **Dependency note.** This app depends on the `phonenumbers` package for
-> accurate, country-aware phone matching. `bench get-app` / `install-app` installs
-> it automatically from the app's requirements. If you *updated* an already-present
-> copy of the app in place (e.g. `git pull`), pull the new dependency with:
->
-> ```bash
-> bench setup requirements
-> # or, targeting just this app's env:
-> ./env/bin/pip install phonenumbers
-> ```
+- **Empty site** → installs in **Strict Mode**. It is already preventing
+  duplicates. Skip to step 6.
+- **Site with existing records** → installs in **Migration Mode** and prints a
+  box of next steps. Nothing is blocked yet. Continue to step 5.
 
 ---
 
-## 3. Apply schema changes (usually automatic)
+## 3. Apply schema changes
 
-`install-app` already migrates the site. If you later pull new code, apply schema
-changes with:
+Usually automatic during `install-app`. If you later pull an update:
 
 ```bash
 bench --site yoursite migrate
 ```
 
-- `migrate` syncs every app's DocType definitions into the database and runs any
-  pending patches. It also (re)creates the composite database index on the
-  `Duplicate Index` table via the app's `on_doctype_update` hook.
+If `migrate` reports that the duplicate index is out of date, run the rebuild it
+tells you to run. That message appears when an app update changed *what* gets
+indexed, which makes an index built by the old version quietly wrong — it can
+both miss real duplicates and block on values that are no longer indexed.
 
 ---
 
-## 4. Build the index for existing data
-
-If your site already has Customers and Leads, they are **not** in the duplicate
-index yet (the index only fills automatically for records saved *after* install).
-Back-fill them once:
+## 4. Restart
 
 ```bash
-bench --site yoursite execute duplicate_guard.api.rebuild_all_indexes
+bench restart      # production (supervisor)
 ```
 
-- `bench execute` runs a single Python function inside the site's context.
-- `duplicate_guard.api.rebuild_all_indexes` walks every guarded DocType in
-  memory-safe batches (2000 records at a time by default) and populates
-  `Duplicate Index`. It commits after each batch, so it is safe to interrupt
-  and re-run.
-
-To rebuild just one DocType:
-
-```bash
-bench --site yoursite execute duplicate_guard.api.rebuild_index --kwargs "{'doctype': 'Customer'}"
-```
-
-On a fresh site with no data, you can skip this step.
+If you run `bench start` in a terminal, stop it with Ctrl-C and start it again.
+Without this the workers keep running the old code and the app appears to do
+nothing.
 
 ---
 
-## 5. Restart and clear caches
+## 5. If your site already has data
+
+Installing a strict duplicate guard onto a database that already contains
+duplicates is actively harmful, so this app does not do it.
+
+Two customers sharing a phone number are ordinary legacy data. With Strict Mode
+on, the *first* person to edit either record — to change a credit limit, an
+address, anything at all — has their save rejected because of a phone number they
+never touched. Both records become uneditable, background jobs touching them
+start failing, and the error blames a field the user was not editing. No new
+duplicate has been prevented; the site is just broken.
+
+So the app starts in **Migration Mode** on a site with data, and gives you one
+command:
 
 ```bash
-bench --site yoursite clear-cache
-bench restart
+bench --site yoursite execute duplicate_guard.api.setup_existing_site
 ```
 
-- `clear-cache` drops cached metadata so the new DocTypes and custom fields show
-  up immediately.
-- `bench restart` restarts the background workers and web server so the new
-  document-event hooks are loaded. On a development bench you may instead be
-  running `bench start` in a terminal — stop it with `Ctrl+C` and start it again.
+It does three things, in the only safe order:
+
+1. **Builds the index** for every guarded DocType, in memory-safe batches.
+2. **Audits** it for duplicates that already exist.
+3. **Writes them to Duplicate Report** and prints a summary.
+
+It deliberately does *not* change your mode. Going strict stays your decision.
+
+**Why the index build matters.** Until it runs the index is empty, so the guard
+matches nothing and looks broken. Rows would then trickle in as records happened
+to get re-saved, and duplicates would start being blocked weeks later, at random,
+on whichever record of a pair was edited second.
+
+**Why the audit matters.** Migration Mode only writes reports from the `validate`
+event — that is, when somebody saves. A pre-existing duplicate pair nobody has
+touched stays invisible. An empty Duplicate Report does **not** mean clean data.
+The audit scans the index directly and finds them all, with no saves required.
+
+Then review:
+
+```
+Desk → Duplicate Report → filter Status = Open
+```
+
+Clean up (merge, correct, or mark Ignored). Re-run the audit any time — it never
+blocks anything:
+
+```bash
+bench --site yoursite execute duplicate_guard.api.audit_duplicates
+```
+
+When the report is clear:
+
+```
+Desk → Duplicate Guard Settings → untick Migration Mode → Save
+```
+
+Strict enforcement begins.
 
 ---
 
-## 6. Verify
+## 6. Configure for your organisation
 
-1. In the ERP UI, search the Awesomebar for **Duplicate Guard Settings** and
-   open it. You should see the settings form with *Enabled* and *Strict Mode*
-   ticked.
-2. Create a Customer named `Test One`. Save.
-3. Create a Lead with Organization Name `Test One`. Saving should be **blocked**
-   with a clear "Duplicate Name" message.
+Open **Duplicate Guard Settings**. At minimum:
 
-If step 3 blocks the save, the installation is working.
+| Setting | Why |
+|---|---|
+| **Default Region / Default Country Code** | Ships as India (`IN` / `91`). Set to yours. |
+| **Company Email Domains (Exempt)** | **Set this if you guard Employees.** Official mailboxes are shared and reassigned; without this they are treated as personal addresses and blocked. |
+| **Check Employee Names** | On by default. Turn off if two different active employees may share a name. |
+
+See [CONFIGURATION.md](CONFIGURATION.md) for everything else.
+
+---
+
+## 7. Verify
+
+See what the app detected on a DocType:
+
+```bash
+bench --site yoursite execute duplicate_guard.core.metadata.describe \
+    --kwargs "{'doctype': 'Lead'}"
+```
+
+Then try it for real: create two Contacts with the same phone number. The second
+save should be rejected with a message naming the record that already holds it.
+
+> **Testing tip.** Two *Customers* with the same phone will **not** collide —
+> that is correct, not a bug. In ERPNext a Customer's phone lives on its linked
+> **Contact**, so phone dedup for Sales flows through Contacts. Test with two
+> Contacts, or two Leads.
+
+---
+
+## Running the tests
+
+```bash
+bench --site yoursite run-tests --app duplicate_guard
+```
+
+The normalizer tests are pure Python. The rest create throwaway records inside a
+transaction that is rolled back afterwards.
 
 ---
 
@@ -182,6 +206,6 @@ If step 3 blocks the save, the installation is working.
 bench --site yoursite uninstall-app duplicate_guard
 ```
 
-This removes the app's DocTypes and data from the site. The `legacy_yetiforce_id`
-custom field is removed with the app's fixtures. The app folder stays in `apps/`
-until you remove it with `bench remove-app duplicate_guard`.
+This removes the app's DocTypes and its index. If you enabled the optional legacy
+id field, that custom field and its data are **not** removed automatically —
+delete it from Customize Form if you want it gone.

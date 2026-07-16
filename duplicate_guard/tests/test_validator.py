@@ -9,6 +9,8 @@ FrappeTestCase wraps each test method in a database transaction that is rolled
 back afterwards, so the records created here never persist.
 """
 
+import unittest
+
 import frappe
 
 # Frappe v16 renamed the base test class: FrappeTestCase (v15) is deprecated in
@@ -22,6 +24,7 @@ except ImportError:  # Frappe v15
 
 from duplicate_guard import api
 from duplicate_guard.core import metadata
+from duplicate_guard.setup.install import legacy_id_enabled
 from duplicate_guard.core.exceptions import (
     DuplicateError,
     DuplicateLegacyError,
@@ -44,6 +47,12 @@ def apply_settings(**overrides):
         "guarded_doctypes": "Customer\nLead\nSupplier\nEmployee\nContact",
         "function_scopes": "Sales: Lead, Customer\nPurchase: Supplier\nHR: Employee",
         "name_field_overrides": "",
+        "phone_field_overrides": "",
+        "email_field_overrides": "",
+        "ignored_fields": "",
+        "employee_active_statuses": "Active",
+        "employee_email_exempt_domains": "example-corp.com",
+        "check_employee_names": 1,
     }
     values.update(overrides)
     settings = frappe.get_doc(SETTINGS)
@@ -113,9 +122,6 @@ def _root(doctype):
 
 
 class DuplicateGuardTestBase(_BaseTestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -361,28 +367,33 @@ class TestFunctionScoping(DuplicateGuardTestBase):
         self.assertGreaterEqual(len(reports), 1)
 
 
+@unittest.skipUnless(
+    legacy_id_enabled(),
+    "The legacy id field is opt-in; set 'duplicate_guard_enable_legacy_id': 1 in "
+    "site_config.json and run 'bench migrate' to exercise these tests.",
+)
 class TestLegacyImport(DuplicateGuardTestBase):
     def test_upsert_creates_then_updates(self):
         first = api.upsert_by_legacy_id(
-            "Lead", {"company_name": "Legacy Org", "legacy_yetiforce_id": "YF-1001"}
+            "Lead", {"company_name": "Legacy Org", "legacy_id": "LEG-1001"}
         )
         self.assertEqual(first["action"], "created")
 
         second = api.upsert_by_legacy_id(
             "Lead",
-            {"company_name": "Legacy Org Renamed", "legacy_yetiforce_id": "YF-1001"},
+            {"company_name": "Legacy Org Renamed", "legacy_id": "LEG-1001"},
         )
         self.assertEqual(second["action"], "updated")
         self.assertEqual(first["name"], second["name"])
 
         # Exactly one Lead carries that legacy id.
-        count = frappe.db.count("Lead", {"legacy_yetiforce_id": "YF-1001"})
+        count = frappe.db.count("Lead", {"legacy_id": "LEG-1001"})
         self.assertEqual(count, 1)
 
     def test_plain_insert_reusing_legacy_id_is_blocked(self):
-        make_lead("Legacy Org", legacy_yetiforce_id="YF-2002")
+        make_lead("Legacy Org", legacy_id="LEG-2002")
         with self.assertRaises(DuplicateLegacyError):
-            make_lead("Different Org", legacy_yetiforce_id="YF-2002")
+            make_lead("Different Org", legacy_id="LEG-2002")
 
 
 class TestCheckDuplicatesApi(DuplicateGuardTestBase):
@@ -406,3 +417,123 @@ class TestGuardDisabled(DuplicateGuardTestBase):
         make_lead("ABC Industries")
         second = make_lead("ABC Industries")  # no error when disabled
         self.assertTrue(second.name)
+
+
+def make_employee(employee_name, status="Active", **extra):
+    """Create and insert an Employee (HR function).
+
+    ``date_of_birth`` / ``date_of_joining`` are mandatory on ERPNext's Employee,
+    so they are defaulted here to keep the tests about duplicates rather than
+    about HR paperwork.
+    """
+    doc = frappe.new_doc("Employee")
+    doc.employee_name = employee_name
+    doc.first_name = employee_name.split(" ")[0]
+    doc.gender = frappe.db.get_value("Gender", {}, "name") or "Male"
+    doc.date_of_birth = "1990-01-01"
+    doc.date_of_joining = "2020-01-01"
+    doc.status = status
+    doc.company = frappe.db.get_value("Company", {}, "name")
+    doc.update(extra)
+    doc.insert()
+    return doc
+
+
+class TestEmployeeRules(DuplicateGuardTestBase):
+    """The HR carve-outs: rejoining staff and shared official mailboxes.
+
+    These encode business rules that look like bugs if you do not know them:
+    an employee's details are only reserved while they are *active*, and an
+    official company address may legitimately sit on several employees.
+    """
+
+    def test_active_employee_phone_is_unique(self):
+        make_employee("Asha Rao", cell_number="9811100011")
+        with self.assertRaises(DuplicateError):
+            make_employee("Bela Sen", cell_number="+91 9811100011")
+
+    def test_active_employee_name_is_unique(self):
+        make_employee("Chetan Iyer")
+        with self.assertRaises(DuplicateError):
+            make_employee("chetan   IYER")
+
+    def test_employee_name_check_can_be_disabled(self):
+        apply_settings(check_employee_names=0)
+        make_employee("Devi Nair")
+        second = make_employee("Devi Nair")  # allowed: names are not checked
+        self.assertTrue(second.name)
+
+    def test_left_employee_frees_up_phone(self):
+        # A resigned employee's number can be reused - including by the same
+        # person rejoining under a new Employee record.
+        make_employee("Esha Roy", status="Left", cell_number="9811100022")
+        rejoiner = make_employee("Esha Roy", cell_number="9811100022")
+        self.assertTrue(rejoiner.name)
+
+    def test_resignation_releases_the_number(self):
+        first = make_employee("Farid Khan", cell_number="9811100033")
+        first.status = "Left"
+        first.save()
+        replacement = make_employee("Gita Bose", cell_number="9811100033")
+        self.assertTrue(replacement.name)
+
+    def test_company_email_may_be_shared(self):
+        make_employee("Hari Menon", personal_email="accounts@example-corp.com")
+        second = make_employee("Ila Dutt", personal_email="accounts@example-corp.com")
+        self.assertTrue(second.name)
+
+    def test_personal_email_is_still_unique(self):
+        make_employee("Jai Verma", personal_email="jai@gmail.com")
+        with self.assertRaises(DuplicateError):
+            make_employee("Kiran Das", personal_email="JAI@Gmail.com")
+
+    def test_employee_does_not_collide_with_sales(self):
+        # HR and Sales are separate functions: the same person may be both an
+        # employee and a customer contact.
+        make_employee("Lata Pillai", cell_number="9811100044")
+        lead = make_lead("Some Org", mobile_no="9811100044")
+        self.assertTrue(lead.name)
+
+
+class TestRenameKeepsIndexAccurate(DuplicateGuardTestBase):
+    def test_renaming_a_customer_moves_its_index_rows(self):
+        # Without the after_rename hook the old rows are orphaned: they keep
+        # matching, so the next record to use the value is blocked and told it
+        # belongs to a record that no longer exists.
+        cust = make_customer("Rename Me Ltd")
+        frappe.rename_doc("Customer", cust.name, "Renamed Ltd", force=True)
+
+        stale = frappe.db.count(
+            "Duplicate Index",
+            {"reference_doctype": "Customer", "reference_name": cust.name},
+        )
+        self.assertEqual(stale, 0)
+
+        moved = frappe.db.count(
+            "Duplicate Index",
+            {"reference_doctype": "Customer", "reference_name": "Renamed Ltd"},
+        )
+        self.assertGreaterEqual(moved, 1)
+
+
+class TestAuditScanner(DuplicateGuardTestBase):
+    def test_audit_finds_preexisting_duplicates(self):
+        # Migration Mode only reports what someone re-saves; the audit finds the
+        # collisions already sitting in the data.
+        apply_settings(migration_mode=1)
+        make_lead("Audit Org A", mobile_no="9812200011")
+        make_lead("Audit Org B", mobile_no="9812200011")
+
+        result = api.audit_duplicates()
+        values = {group["value"] for group in result["duplicates"]}
+        self.assertIn("+919812200011", values)
+
+    def test_audit_ignores_same_entity_pairs(self):
+        # A Contact legitimately carries its own Lead's number.
+        apply_settings(migration_mode=1)
+        lead = make_lead("Same Entity Org", mobile_no="9812200022")
+        make_contact(phone="9812200022", link_doctype="Lead", link_name=lead.name)
+
+        result = api.audit_duplicates()
+        values = {group["value"] for group in result["duplicates"]}
+        self.assertNotIn("+919812200022", values)

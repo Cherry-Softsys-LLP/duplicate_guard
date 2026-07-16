@@ -32,7 +32,7 @@ class DuplicateError(DuplicateGuardError):
 
 
 class DuplicateLegacyError(DuplicateGuardError):
-    """Raised when a legacy_yetiforce_id already exists on another record.
+    """Raised when a legacy_id already exists on another record.
 
     Legacy imports are expected to go through the upsert API
     (``duplicate_guard.api.upsert_by_legacy_id``). If a plain insert tries

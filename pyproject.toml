@@ -3,7 +3,7 @@ name = "duplicate_guard"
 authors = [
     { name = "Your Company", email = "support@example.com" }
 ]
-description = "Prevent duplicate Leads and Customers in ERPNext (v15)."
+description = "Prevent duplicate customers, leads, suppliers, employees and contacts in ERPNext, scoped per business function."
 requires-python = ">=3.10"
 readme = "README.md"
 dynamic = ["version"]
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://example.com/duplicate_guard"
+Homepage = "https://github.com/your-org/duplicate_guard"   # TODO: set before publishing
 
 [build-system]
 requires = ["flit_core >=3.4,<4"]

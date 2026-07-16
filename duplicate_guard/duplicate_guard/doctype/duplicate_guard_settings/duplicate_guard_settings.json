@@ -21,7 +21,17 @@
   "scope_section",
   "guarded_doctypes",
   "function_scopes",
-  "name_field_overrides"
+  "employee_section",
+  "employee_active_statuses",
+  "check_employee_names",
+  "column_break_employee",
+  "employee_email_exempt_domains",
+  "fields_section",
+  "name_field_overrides",
+  "phone_field_overrides",
+  "column_break_fields",
+  "email_field_overrides",
+  "ignored_fields"
  ],
  "fields": [
   {
@@ -118,10 +128,67 @@
    "label": "Function Scopes"
   },
   {
-   "description": "Optional. Override which field(s) hold the entity name, one per line, e.g. 'Lead: company_name, lead_name'. Leave blank to use sensible defaults.",
+   "fieldname": "employee_section",
+   "fieldtype": "Section Break",
+   "label": "Employee (HR) Rules"
+  },
+  {
+   "default": "Active",
+   "description": "Employee statuses that count as currently employed, one per line. Name/phone/personal-email uniqueness is enforced ONLY against employees in these statuses, so a resigned person's details free up for reuse when the same person rejoins. ERPNext options: Active, Inactive, Suspended, Left.",
+   "fieldname": "employee_active_statuses",
+   "fieldtype": "Small Text",
+   "label": "Active Employee Statuses"
+  },
+  {
+   "default": "1",
+   "description": "Enforce unique names among active employees. Turn this OFF if two genuinely different employees may share a name (common in many regions); phone and personal email remain checked either way.",
+   "fieldname": "check_employee_names",
+   "fieldtype": "Check",
+   "label": "Check Employee Names"
+  },
+  {
+   "fieldname": "column_break_employee",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Your official company email domains, one per line (e.g. example.com). Addresses on these domains are NEVER checked for Employees, because an official mailbox is legitimately shared and gets reassigned from a leaver to a new hire. Every other (personal) employee email must still be unique. Leave blank to check all employee emails.",
+   "fieldname": "employee_email_exempt_domains",
+   "fieldtype": "Small Text",
+   "label": "Company Email Domains (Exempt)"
+  },
+  {
+   "description": "Phone/email/name fields are discovered automatically from DocType metadata. Use these only when the automatic detection gets it wrong on your site.",
+   "fieldname": "fields_section",
+   "fieldtype": "Section Break",
+   "label": "Field Discovery Overrides"
+  },
+  {
+   "description": "Optional. Override which field(s) hold the entity name, one DocType per line, e.g. 'Lead: company_name, lead_name'. Leave blank to use sensible defaults.",
    "fieldname": "name_field_overrides",
    "fieldtype": "Small Text",
    "label": "Name Field Overrides"
+  },
+  {
+   "description": "Optional. Declare phone fields explicitly, one DocType per line, e.g. 'Lead: mobile_no, custom_alt_number'. REPLACES automatic detection for that DocType.",
+   "fieldname": "phone_field_overrides",
+   "fieldtype": "Small Text",
+   "label": "Phone Field Overrides"
+  },
+  {
+   "fieldname": "column_break_fields",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Optional. Declare email fields explicitly, one DocType per line, e.g. 'Employee: personal_email'. REPLACES automatic detection for that DocType.",
+   "fieldname": "email_field_overrides",
+   "fieldtype": "Small Text",
+   "label": "Email Field Overrides"
+  },
+  {
+   "description": "Optional. Fields to exclude from checking, one DocType per line, e.g. 'Lead: email_signature'. Subtracted from whatever detection or an override produced.",
+   "fieldname": "ignored_fields",
+   "fieldtype": "Small Text",
+   "label": "Ignored Fields"
   }
  ],
  "index_web_pages_for_search": 0,
@@ -134,14 +201,14 @@
  "owner": "Administrator",
  "permissions": [
   {
-   "read": 1,
-   "role": "System Manager",
-   "write": 1,
    "create": 1,
    "delete": 1,
    "email": 1,
    "print": 1,
-   "share": 1
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
   }
  ],
  "quick_entry": 0,

@@ -1,175 +1,171 @@
 # Configuration Guide
 
-All configuration lives in one place: the **Duplicate Guard Settings**
-document (search for it in the Awesomebar). It is a *Single* DocType, so there is
-exactly one settings record for the whole site.
-
----
-
-## Enforcement section
-
-| Field | Meaning |
-|---|---|
-| **Enabled** | Master switch. When unticked, no duplicate checking happens anywhere. |
-| **Strict Mode** | Reject duplicates with an error. This is the normal production behaviour. |
-| **Migration Mode** | Do not block; instead log each collision to a *Duplicate Report* and allow the save. **Migration Mode overrides Strict Mode.** |
-| **Check Names** | Enable/disable name-based matching. |
-| **Check Phone Numbers** | Enable/disable phone-based matching. |
-| **Check Emails** | Enable/disable email-based matching. |
-
-### Choosing a mode
-
-- **Day-to-day production:** *Enabled* on, *Strict Mode* on, *Migration Mode*
-  off. New duplicates are rejected at the point of entry.
-- **Importing messy legacy data:** turn *Migration Mode* on. Every collision is
-  recorded in *Duplicate Report* for you to review, but imports never fail
-  half-way. When the data is clean, switch back to Strict Mode.
-
-The Settings form shows an orange banner while Migration Mode is on, and a red
-banner if the guard is disabled, so the current posture is never a surprise.
-
----
-
-## Phone Normalization section
-
-Phone matching compares numbers **after** normalizing them to canonical
-**E.164** international form — the country code is always part of the stored
-value (e.g. `+919876543210`). This means:
-
-- the same number entered as `+91 9876543210`, `09876543210` or `98765 43210`
-  all match each other, **and**
-- a number that only differs by country code (`+91 9876543210` in India vs
-  `+1 9876543210` in the USA) is correctly treated as **different**, so you do
-  not get false duplicates across countries.
-
-When the `phonenumbers` package (Google's libphonenumber) is installed — it is a
-declared dependency, so `bench` installs it automatically — it does the parsing,
-handling every country's trunk-prefix and numbering rules. If it is ever absent,
-a built-in fallback produces the same E.164 shape for the common cases.
-
-| Field | Default | Meaning |
-|---|---|---|
-| **Default Country Code** | `91` | Numeric dialing code without `+`. Used by the built-in fallback when a bare number has no country code. India = `91`, USA/Canada = `1`, UK = `44`. |
-| **Default Region (ISO)** | `IN` | 2-letter ISO country code used by `phonenumbers` to interpret numbers typed **without** a country code. India = `IN`, USA = `US`, UK = `GB`. |
-| **National Number Length** | `10` | Expected digit count of a local number (India = `10`). Used by the fallback to detect a bare number that already embeds its country code. |
-
-> Once you convert your contact fields to the **Phone** field type, entries carry
-> an explicit `+CC` prefix, so the region/country-code defaults only ever apply
-> to older bare numbers. Set *Default Region* to wherever most of your
-> country-code-less legacy numbers originate.
-
-**Important:** if you change *Default Country Code*, *Default Region* or
-*National Number Length*, the way numbers normalize changes, so **rebuild the
-index** afterwards (see the Administrator Guide) — otherwise old rows keep their
-previous canonical form and matching is inconsistent.
-
----
-
-## Scope section
-
-| Field | Meaning |
-|---|---|
-| **Guarded DocTypes** | One DocType per line. Defaults to `Customer`, `Lead`, `Supplier`, `Employee`, `Contact`. Address is intentionally excluded. |
-| **Function Scopes** | Business functions, one per line as `Function: DocType, DocType`. Duplicates are only detected *within* a function. Default: `Sales: Lead, Customer` / `Purchase: Supplier` / `HR: Employee`. |
-| **Name Field Overrides** | Optional. Override which field(s) hold the entity name, one DocType per line, e.g. `Lead: company_name, lead_name`. Leave blank to use sensible defaults. |
-
-### Function scoping
-
-Duplicates are detected **within a business function**, never globally. The same
-phone or email can appear in different functions (for example, a person who is
-both a customer contact and a supplier contact) without being flagged; within a
-single function it is blocked.
-
-| Function | DocTypes | Where phone/email lives |
-|---|---|---|
-| Sales | Lead, Customer | Lead: on the record · Customer: on its Contacts |
-| Purchase | Supplier | on its Contacts |
-| HR | Employee | on the Employee (`cell_number`, `personal_email`, …) |
-
-A **Contact** takes the function(s) of whatever party it links to (via its
-`links` table). A Contact with no party link falls into its own `Contact` bucket.
-
-### How coverage is split across DocTypes
-
-ERPNext stores contact details differently per party, so the app checks
-different things on each:
-
-| DocType | Name checked | Phone/email checked | Where the phone/email lives |
-|---|---|---|---|
-| Lead | `company_name` | yes | directly on the Lead |
-| Customer | `customer_name` | no (via Contacts) | on its linked Contacts |
-| Supplier | `supplier_name` | no (via Contacts) | on its linked Contacts |
-| Employee | — (people share names) | yes | directly on the Employee |
-| Contact | — | yes | on the Contact (`phone_nos` / `email_ids`) |
-
-A Customer's / Supplier's own `mobile_no` / `email_id` are read-only copies
-fetched from the primary Contact, so the app deliberately does **not** check them
-on the party (that would false-clash with the Contact). Instead it guards the
-**Contact**, which is where the real values live.
-
-> If you keep phone/email somewhere else (custom fields directly on a party),
-> add that DocType to *Guarded DocTypes*. **Address is deliberately not guarded**
-> — a firm legitimately has several addresses sharing the same contact details.
-
-### How fields are discovered
-
-You never list phone or email fields here — they are discovered from each
-DocType's metadata automatically:
-
-- **Phone fields**: any field of type *Phone*, or a *Data* field whose *Options*
-  is `Phone`.
-- **Email fields**: any *Data* field whose *Options* is `Email`.
-- **Child-table fields**: phone/email fields inside child tables are also found
-  (this is how a Contact's `phone_nos` / `email_ids` grids are covered).
-- **Field-name fallback**: a *Data* field with no explicit *Phone*/*Email*
-  option is still recognised if its name looks like a phone/email field
-  (e.g. `phone`, `mobile_no`, `fax`, `whatsapp`, `email_id`). This is what lets
-  the app pick up child fields such as *Contact Phone*'s `phone`, which is a
-  plain Data field.
-
-So if an administrator adds a custom `whatsapp` field to Contact or Lead, it is
-included in duplicate checking immediately, with no code change. The discovery
-cache is cleared automatically whenever a DocType or Custom Field is saved.
-
-### Name fields (defaults)
-
-| DocType | Default name field checked |
-|---|---|
-| Customer | `customer_name` |
-| Lead | `company_name` (organization name only) |
-
-Only the **organization name** is matched for Leads — a person's name
-(`lead_name` / `first_name`) is deliberately not used, so two different
-individuals who happen to share a full name are not flagged as duplicates.
-
-If you ever want to change which field(s) count as "the name" (for example to
-also match the person name on Leads, or to point at a custom field), use a
-*Name Field Overrides* line, one DocType per line:
+Everything is configured from **Duplicate Guard Settings** (a Single DocType):
 
 ```
-Lead: company_name, lead_name
-Customer: customer_name
+Desk → search "Duplicate Guard Settings"
 ```
+
+Nothing in this app requires editing Python to configure it.
 
 ---
 
-## Adding another DocType to the guard
+## Enforcement
 
-The engine is generic. To guard, say, **Supplier** as well:
+| Field | Default | What it does |
+|---|---|---|
+| **Enabled** | on | Master switch. Off = no checking at all. The index keeps updating regardless, so turning it back on is always safe. |
+| **Strict Mode** | on | Reject duplicates with an error. Normal production behaviour. |
+| **Migration Mode** | *depends* | Do not block; log to Duplicate Report instead. **Overrides Strict Mode.** |
+| **Check Names / Phone Numbers / Emails** | on | Site-wide switches per value type. |
 
-1. Add `Supplier` on its own line in *Guarded DocTypes*.
-2. Add the document-event wiring for it in `hooks.py` (mirror the `Customer`
-   block) and restart. This code step is required because Frappe reads event
-   hooks from `hooks.py`, not from the database.
-3. Run `bench execute duplicate_guard.api.rebuild_index --kwargs "{'doctype':'Supplier'}"`.
+Migration Mode defaults to **on** if the site had data when the app was
+installed, and **off** on an empty site. See
+[INSTALLATION.md](INSTALLATION.md#5-if-your-site-already-has-data).
 
-The Administrator Guide walks through this in full.
+> **Enabled vs Migration Mode.** "Enabled = off" means the app does nothing.
+> "Migration Mode = on" means it watches and records but never blocks. Use
+> Migration Mode while cleaning up; use Enabled = off only to switch the app off
+> entirely.
+
+---
+
+## Phone normalization
+
+Phone numbers are stored in canonical **E.164** form (`+919876543210`), so
+`+91 9876543210`, `09876543210` and `98765 43210` all match — while `+1 9876543210`
+stays distinct.
+
+| Field | Default | What it does |
+|---|---|---|
+| **Default Country Code** | `91` | Numeric dialing code, no `+`. Used by the built-in fallback normalizer. |
+| **Default Region (ISO)** | `IN` | Two-letter ISO code used to read numbers typed without a country code. |
+| **National Number Length** | `10` | Expected local-number length. |
+
+**These are only defaults.** The region is resolved **per record**: a Lead or
+Supplier with a `country` set has its numbers read in that country, and a Contact
+borrows the country of the party it links to. Only records with no country fall
+back to the settings above. That is what stops a UK lead's `07911 123456` being
+stored as an Indian number on an India-defaulted site.
+
+> Install the `phonenumbers` package (it ships as a dependency) for
+> gold-standard parsing. Without it a built-in fallback handles the common cases.
+
+---
+
+## Scope
+
+| Field | Default | What it does |
+|---|---|---|
+| **Guarded DocTypes** | Customer, Lead, Supplier, Employee, Contact | One per line. |
+| **Function Scopes** | `Sales: Lead, Customer`<br>`Purchase: Supplier`<br>`HR: Employee` | Duplicates are only detected *within* a function. |
+
+Because Customer and Lead share **Sales**, a Customer and a Lead cannot hold the
+same name, and their Contacts cannot share a phone or email. Supplier
+(**Purchase**) and Employee (**HR**) are isolated: the same person may be an
+employee and a supplier contact without being flagged.
+
+A Contact has no function of its own — it inherits the scope of every party it
+links to. A Contact linked to nothing falls back to a private `Contact` scope.
+
+> **Address is deliberately not guarded.** A firm legitimately has several
+> addresses sharing contact details.
+
+---
+
+## Employee (HR) rules
+
+Employees are a genuine exception to "everything must be unique", because two
+real-world facts break naive dedup.
+
+| Field | Default | What it does |
+|---|---|---|
+| **Active Employee Statuses** | `Active` | Statuses that reserve a person's details. |
+| **Company Email Domains (Exempt)** | *(blank)* | Domains whose addresses are never checked for Employees. |
+| **Check Employee Names** | on | Enforce unique names among active employees. |
+
+**People rejoin.** The same person may need a second Employee record years later.
+Name, phone and personal email are enforced **only among employees in an active
+status** — a resigned employee's details are released and can be reused.
+Inactive employees are not indexed at all.
+
+Add `Suspended` / `Inactive` to *Active Employee Statuses* if you want those to
+keep reserving a person's details.
+
+**Official mailboxes are shared and reassigned.** An address like
+`accounts@example.com` may legitimately sit on several employees and be handed
+from a leaver to a new hire. Put your company domains in *Company Email Domains
+(Exempt)*, one per line:
+
+```
+example.com
+example-group.com
+```
+
+Addresses on those domains are never indexed and never blocked. Every *other*
+(personal) employee email is still enforced.
+
+> **Set this before going live.** Blank means no exemption, so your shared
+> mailboxes will be treated as personal addresses and the second employee to get
+> one will be blocked.
+
+**Names.** Two genuinely different active people can share a name — common in
+many regions. Turn **Check Employee Names** off if that applies to you; phone and
+personal email remain checked and are the reliable unique keys.
+
+---
+
+## Field discovery overrides
+
+Phone, email and name fields are discovered automatically from DocType metadata —
+both top-level fields and fields inside child tables (a Contact's `phone_nos` /
+`email_ids` grids). Add a custom phone field tomorrow and it is covered with no
+code change.
+
+Detection uses, strongest first: the `Phone` fieldtype → an `options = "Phone"` /
+`"Email"` marker → the field's name. Fields that mirror another record
+(`fetch_from`) are skipped, because indexing a copy would collide a record with
+its own source.
+
+Use these only when detection gets it wrong:
+
+| Field | Format |
+|---|---|
+| **Name Field Overrides** | `Lead: company_name, lead_name` |
+| **Phone Field Overrides** | `Lead: mobile_no, custom_alt_number` |
+| **Email Field Overrides** | `Employee: personal_email` |
+| **Ignored Fields** | `Lead: email_signature` |
+
+One DocType per line. An override **replaces** detection for that DocType and
+value type; *Ignored Fields* is subtracted from whatever detection or an override
+produced.
+
+See exactly what is detected:
+
+```bash
+bench --site yoursite execute duplicate_guard.core.metadata.describe \
+    --kwargs "{'doctype': 'Employee'}"
+```
 
 ---
 
 ## After changing settings
 
-Settings changes take effect immediately — saving the Settings document clears
-the relevant caches. The one exception is a change to **Default Country Code** or
-**National Number Length**, which changes how phones normalize; rebuild the index
-afterwards so existing rows match the new rules.
+Most changes take effect immediately (the caches are cleared on save).
+
+**But if you change anything that alters what gets indexed** — guarded DocTypes,
+field overrides, employee statuses or exempt domains, phone defaults — rebuild
+the index so it matches the new rules:
+
+```
+Duplicate Guard Settings → Rebuild Duplicate Index
+```
+
+or:
+
+```bash
+bench --site yoursite execute duplicate_guard.api.rebuild_all_indexes
+```
+
+Skipping this leaves the index describing the old rules: it can both miss real
+duplicates and block on values that should no longer be checked.
