@@ -151,7 +151,7 @@ The same index makes the audit cheap: finding every pre-existing duplicate is on
 
 ```bash
 cd ~/frappe-bench
-bench get-app duplicate_guard https://github.com/your-org/duplicate_guard
+bench get-app duplicate_guard https://github.com/Cherry-Softsys-LLP/duplicate_guard
 bench --site yoursite install-app duplicate_guard
 bench restart
 ```
