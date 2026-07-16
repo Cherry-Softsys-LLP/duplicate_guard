@@ -36,7 +36,7 @@ You should see both `frappe` and `erpnext` at 15.x or 16.x.
 
 ```bash
 cd ~/frappe-bench
-bench get-app duplicate_guard https://github.com/your-org/duplicate_guard
+bench get-app duplicate_guard https://github.com/Cherry-Softsys-LLP/duplicate_guard
 ```
 
 Or from a local folder:
